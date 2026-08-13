@@ -3,10 +3,10 @@
 // ------------------------------------------------------------------
 // CORS Configuration for Vercel Serverless
 // ------------------------------------------------------------------
-header('Access-Control-Allow-Origin: *');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, Accept, Origin, Accept-Version');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, Accept, Origin, Accept-Version, Cache-Control, Pragma, Expires');
     header('Access-Control-Max-Age: 86400');
     http_response_code(200);
     exit(0);
@@ -54,6 +54,7 @@ try {
     $kernel->terminate($request, $response);
 
 } catch (\Throwable $e) {
+    header('Access-Control-Allow-Origin: *');
     http_response_code(500);
     header('Content-Type: application/json');
     echo json_encode([
