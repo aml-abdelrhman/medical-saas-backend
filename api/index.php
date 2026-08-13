@@ -24,10 +24,26 @@ try {
     $app = require_once __DIR__ . '/../bootstrap/app.php';
     $app->useStoragePath($tmpBase);
 
-    // تسجيل يدوي مباشر للـ Providers لتخطي مشكلة تحميل bootstrap/providers.php
-    $app->register(\Illuminate\View\ViewServiceProvider::class);
-    $app->register(\Illuminate\Session\SessionServiceProvider::class);
-    $app->register(\Illuminate\Cookie\CookieServiceProvider::class);
+    // تسجيل يدوي شامل لكل الـ Core Providers الأساسية
+    $coreProviders = [
+        \Illuminate\Filesystem\FilesystemServiceProvider::class,
+        \Illuminate\View\ViewServiceProvider::class,
+        \Illuminate\Session\SessionServiceProvider::class,
+        \Illuminate\Cookie\CookieServiceProvider::class,
+        \Illuminate\Encryption\EncryptionServiceProvider::class,
+        \Illuminate\Hashing\HashServiceProvider::class,
+        \Illuminate\Database\DatabaseServiceProvider::class,
+        \Illuminate\Pagination\PaginationServiceProvider::class,
+        \Illuminate\Validation\ValidationServiceProvider::class,
+        \Illuminate\Translation\TranslationServiceProvider::class,
+    ];
+
+    foreach ($coreProviders as $provider) {
+        if (class_exists($provider)) {
+            $app->register($provider);
+        }
+    }
+
     $app->register(\App\Providers\AppServiceProvider::class);
 
     $kernel = $app->make(Illuminate\Contracts\Http\Kernel::class);
