@@ -1,27 +1,22 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {
     /**
      * Run the migrations.
      */
-public function up(): void
-{
-    Schema::table('specialties', function (Blueprint $table) {
-        $table->json('name')->change();
-        $table->json('description')->change();
-    });
-}
+    public function up(): void
+    {
+        DB::statement('ALTER TABLE specialties ALTER COLUMN name TYPE json USING to_json(name)');
+        DB::statement('ALTER TABLE specialties ALTER COLUMN description TYPE json USING to_json(description)');
+    }
 
-public function down(): void
-{
-    Schema::table('specialties', function (Blueprint $table) {
-        $table->string('name')->change();
-        $table->text('description')->change();
-    });
-}
+    public function down(): void
+    {
+        DB::statement('ALTER TABLE specialties ALTER COLUMN name TYPE varchar USING name::text');
+        DB::statement('ALTER TABLE specialties ALTER COLUMN description TYPE text USING description::text');
+    }
 };

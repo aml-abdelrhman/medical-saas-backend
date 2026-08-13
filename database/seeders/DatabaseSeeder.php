@@ -12,9 +12,15 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        // تعطيل قيود المفاتيح الأجنبية تماماً لمنع أي تداخل أو خطأ أثناء الـ Seeding
         Schema::disableForeignKeyConstraints();
 
-        // 1. إنشاء حساب الـ Super Admin الخاص بالمنصة
+        // 1. زرع التخصصات أولاً وبشكل مباشر لضمان وجودها قبل الكلينيك والدكاترة
+        $this->call([
+            SpecialtySeeder::class,
+        ]);
+
+        // 2. إنشاء حساب الـ Super Admin الخاص بالمنصة
         User::updateOrCreate(
             ['email' => 'superadmin@platform.com'],
             [
@@ -26,7 +32,7 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
-        // 2. إنشاء الباقات الأساسية أولاً لكي يستطيع الـ ClinicSeeder استخدامها
+        // 3. إنشاء الباقات الأساسية
         Plan::updateOrCreate(
             ['price' => 0.00],
             [
@@ -53,7 +59,7 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
-        // 3. إضافة المستخدم التجريبي التقليدي إذا احتجت إليه
+        // 4. إضافة المستخدم التجريبي التقليدي
         User::updateOrCreate(
             ['email' => 'test@example.com'],
             [
@@ -63,17 +69,17 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
-        // 4. استدعاء باقي الـ Seeders بالترتيب
+        // 5. استدعاء باقي الـ Seeders بالترتيب السليم مع الحفاظ على تعطيل القيود
         $this->call([
-            SpecialtySeeder::class,
-            ClinicSeeder::class, // ستقوم بإنشاء العيادات وربطها باشتراكات نشطة تلقائياً
+            ClinicSeeder::class,
             DoctorSeeder::class,
             ServiceSeeder::class,
             AvailabilitySeeder::class,
             AppointmentSeeder::class,
-            ClinicReviewSeeder::class, // إضافة هذا السطر لتوليد تقييمات الأطباء للمنصة
+            ClinicReviewSeeder::class,
         ]);
 
+        // إعادة تفعيل قيود المفاتيح الأجنبية بعد الانتهاء تماماً
         Schema::enableForeignKeyConstraints();
     }
 }

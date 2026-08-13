@@ -2,7 +2,6 @@
 
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
-header('Content-Type: application/json');
 
 $tmpBase = '/tmp/laravel';
 $dirs = [
@@ -16,11 +15,12 @@ foreach ($dirs as $dir) {
 
 putenv('CACHE_STORE=array');
 putenv('SESSION_DRIVER=cookie');
-putenv('LOG_CHANNEL=single');
+putenv('LOG_CHANNEL=stderr');
 putenv('VIEW_COMPILED_PATH=' . $tmpBase . '/framework/views');
 
 try {
     require __DIR__ . '/../vendor/autoload.php';
+
     $app = require_once __DIR__ . '/../bootstrap/app.php';
     $app->useStoragePath($tmpBase);
 
@@ -29,31 +29,17 @@ try {
     $request = Illuminate\Http\Request::capture();
     $response = $kernel->handle($request);
 
-    $logPath = $tmpBase . '/logs/laravel.log';
-    $logContent = file_exists($logPath) ? file_get_contents($logPath) : 'NO LOG FILE';
-
-    if ($response->getStatusCode() >= 500) {
-        echo json_encode([
-            'status' => $response->getStatusCode(),
-            'log_content' => $logContent,
-        ], JSON_PRETTY_PRINT);
-        exit;
-    }
-
     $response->send();
     $kernel->terminate($request, $response);
 
 } catch (\Throwable $e) {
-    $logPath = $tmpBase . '/logs/laravel.log';
-    $logContent = file_exists($logPath) ? file_get_contents($logPath) : 'NO LOG FILE';
-
     http_response_code(500);
+    header('Content-Type: application/json');
     echo json_encode([
         'error' => true,
         'message' => $e->getMessage(),
         'file' => $e->getFile(),
         'line' => $e->getLine(),
-        'log_content' => $logContent,
+        'trace' => explode("\n", $e->getTraceAsString()),
     ], JSON_PRETTY_PRINT);
-    exit;
 }

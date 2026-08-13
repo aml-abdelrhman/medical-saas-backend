@@ -8,21 +8,15 @@ use Illuminate\Support\Facades\DB;
 return new class extends Migration {
     public function up(): void
     {
-        // 1. محاولة حذف قيد الفحص (Check Constraint) المزعج عن عمود comment إن وجد
-        try {
-            DB::statement('ALTER TABLE clinic_reviews DROP CHECK clinic_reviews_comment_check');
-        } catch (\Exception $e) {
-            // تجاهل الخطأ إذا لم يكن الاسم مطابخاً تماماً
-        }
+        // 1. تعديل نوع البيانات إلى TEXT مباشرة عبر SQL وبشكل آمن
+        DB::statement('ALTER TABLE clinic_reviews ALTER COLUMN comment TYPE TEXT;');
 
-        // 2. إعادة تعريف عمود comment ليصبح نص عادي (TEXT) بدون قيود
-        Schema::table('clinic_reviews', function (Blueprint $table) {
-            $table->text('comment')->change();
-        });
+        // 2. إزالة القيمة الافتراضية القديمة إن وجدت لتجنب أي تعارض
+        DB::statement('ALTER TABLE clinic_reviews ALTER COLUMN comment DROP DEFAULT;');
     }
 
     public function down(): void
     {
-        //
+        // 
     }
 };

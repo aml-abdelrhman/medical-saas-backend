@@ -9,12 +9,17 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // تعديل الـ Enum ليقبل 'super_admin' بجانب الأدوار القديمة
-        DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('patient', 'admin', 'doctor', 'super_admin') DEFAULT 'patient'");
+        // 1. حذف الـ Constraint القديم لو موجود عشان منع التعارض
+        DB::statement("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;");
+
+        // 2. إضافة قيد تحقق (Check Constraint) جديد يقبل الأدوار الأربعة
+        DB::statement("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('patient', 'admin', 'doctor', 'super_admin'));");
     }
 
     public function down(): void
     {
-        DB::statement("ALTER TABLE users MODIFY COLUMN role ENUM('patient', 'admin', 'doctor') DEFAULT 'patient'");
+        // الرجوع للقيد القديم بدون super_admin
+        DB::statement("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;");
+        DB::statement("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('patient', 'admin', 'doctor'));");
     }
 };

@@ -24,9 +24,25 @@ class DoctorSeeder extends Seeder
             return;
         }
 
-        // جلب التخصصات بربط الـ slug مع الـ id لضمان الربط الدقيق
+        // جلب التخصصات بربط الـ slug مع الـ id
         $specialties = DB::table('specialties')->pluck('id', 'slug')->toArray();
-        $defaultSpecialtyId = reset($specialties) ?: 1;
+
+        // [الحل الذاتي] لو جدول التخصصات فاضي لأي سبب، نقوم بإدخال التخصصات الأساسية فوراً هنا لمنع أي خطأ
+        if (empty($specialties)) {
+            $defaultSpecialties = [
+                ['name' => json_encode(['ar' => 'تجميل', 'en' => 'Aesthetics'], JSON_UNESCAPED_UNICODE), 'slug' => 'aesthetics', 'created_at' => now(), 'updated_at' => now()],
+                ['name' => json_encode(['ar' => 'تغذية', 'en' => 'Nutrition'], JSON_UNESCAPED_UNICODE), 'slug' => 'nutrition', 'created_at' => now(), 'updated_at' => now()],
+                ['name' => json_encode(['ar' => 'نساء وتوليد', 'en' => 'OB/GYN'], JSON_UNESCAPED_UNICODE), 'slug' => 'ob-gyn', 'created_at' => now(), 'updated_at' => now()],
+                ['name' => json_encode(['ar' => 'أسنان', 'en' => 'Dentistry'], JSON_UNESCAPED_UNICODE), 'slug' => 'dentistry', 'created_at' => now(), 'updated_at' => now()],
+                ['name' => json_encode(['ar' => 'علاج طبيعي', 'en' => 'Physical Therapy'], JSON_UNESCAPED_UNICODE), 'slug' => 'physical-therapy', 'created_at' => now(), 'updated_at' => now()],
+                ['name' => json_encode(['ar' => 'نفسية', 'en' => 'Psychiatry'], JSON_UNESCAPED_UNICODE), 'slug' => 'psychiatry', 'created_at' => now(), 'updated_at' => now()],
+            ];
+            
+            DB::table('specialties')->insert($defaultSpecialties);
+            $specialties = DB::table('specialties')->pluck('id', 'slug')->toArray();
+        }
+
+        $firstAvailableId = reset($specialties);
 
         $doctorsData = [
             // تجميل (Aesthetics)
@@ -259,24 +275,21 @@ class DoctorSeeder extends Seeder
         ];
 
         foreach ($doctorsData as $index => $doc) {
-            $specialtyId = $specialties[$doc['specialty']] ?? $defaultSpecialtyId;
+            $specialtyId = $specialties[$doc['specialty']] ?? $firstAvailableId;
             $imageNumber = $index + 1;
 
-            // توليد بريد إلكتروني فريد لكل طبيب
             $email = 'doctor' . ($index + 1) . '@clinic.com';
 
-            // إنشاء حساب مستخدم (User) لكل طبيب لملء عمود user_id
             $user = User::firstOrCreate(
                 ['email' => $email],
                 [
                     'name' => $doc['name_ar'],
-                    'password' => Hash::make('password'), // كلمة مرور افتراضية
+                    'password' => Hash::make('password'),
                     'role' => 'doctor',
                     'clinic_id' => $clinicId,
                 ]
             );
 
-            // إدخال الطبيب مع ربطه بالـ user_id والـ specialty_id والـ clinic_id
             Doctor::create([
                 'name' => ['ar' => $doc['name_ar'], 'en' => $doc['name_en']],
                 'slug' => Str::slug($doc['name_en']),
