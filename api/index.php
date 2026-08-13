@@ -17,12 +17,17 @@ error_reporting(E_ALL);
 
 $tmpBase = '/tmp/laravel';
 $dirs = [
-    $tmpBase, $tmpBase . '/framework', $tmpBase . '/framework/cache',
-    $tmpBase . '/framework/cache/data', $tmpBase . '/framework/sessions',
-    $tmpBase . '/framework/views', $tmpBase . '/logs',
+    $tmpBase,
+    $tmpBase . '/framework',
+    $tmpBase . '/framework/cache',
+    $tmpBase . '/framework/cache/data',
+    $tmpBase . '/framework/sessions',
+    $tmpBase . '/framework/views',
+    $tmpBase . '/logs',
 ];
 foreach ($dirs as $dir) {
-    if (!is_dir($dir)) mkdir($dir, 0777, true);
+    if (!is_dir($dir))
+        mkdir($dir, 0777, true);
 }
 
 putenv('CACHE_STORE=array');
@@ -38,6 +43,9 @@ try {
     $app->useStoragePath($tmpBase);
 
     $kernel = $app->make(Illuminate\Contracts\Http\Kernel::class);
+
+    // Fix for Vercel routing: Ensure Laravel doesn't strip /api
+    $_SERVER['SCRIPT_NAME'] = '/index.php';
 
     $request = Illuminate\Http\Request::capture();
     $response = $kernel->handle($request);
