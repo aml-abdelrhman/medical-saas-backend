@@ -54,7 +54,12 @@ try {
     $kernel->terminate($request, $response);
 
 } catch (\Throwable $e) {
+    // تم إضافة هيدر الـ CORS هنا عشان المتصفح يمنع ظهور Network Error الوهمية
+    // ويسمح بقراءة تفاصيل الخطأ الحقيقي وإظهارها في الـ Console مباشرة
     header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, Accept, Origin');
+    
     http_response_code(500);
     header('Content-Type: application/json');
     echo json_encode([
