@@ -13,7 +13,6 @@ $dirs = [
     $tmpBase . '/framework/sessions',
     $tmpBase . '/framework/views',
     $tmpBase . '/logs',
-    $tmpBase . '/bootstrap_cache',
 ];
 foreach ($dirs as $dir) {
     if (!is_dir($dir)) {
@@ -21,8 +20,6 @@ foreach ($dirs as $dir) {
     }
 }
 
-putenv('APP_STORAGE=' . $tmpBase);
-putenv('VIEW_COMPILED_PATH=' . $tmpBase . '/framework/views');
 putenv('CACHE_STORE=array');
 putenv('SESSION_DRIVER=cookie');
 putenv('LOG_CHANNEL=stderr');
@@ -32,9 +29,7 @@ try {
 
     $app = require_once __DIR__ . '/../bootstrap/app.php';
 
-    // إعادة توجيه مسارات storage و bootstrap/cache لـ /tmp
     $app->useStoragePath($tmpBase);
-    $app->useBootstrapPath(__DIR__ . '/../bootstrap');
 
     $kernel = $app->make(Illuminate\Contracts\Http\Kernel::class);
 
