@@ -17,6 +17,7 @@ putenv('CACHE_STORE=array');
 putenv('SESSION_DRIVER=cookie');
 putenv('LOG_CHANNEL=stderr');
 putenv('VIEW_COMPILED_PATH=' . $tmpBase . '/framework/views');
+putenv('APP_DEBUG=true');
 
 try {
     require __DIR__ . '/../vendor/autoload.php';
