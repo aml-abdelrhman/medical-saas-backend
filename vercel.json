@@ -11,6 +11,7 @@
       "dest": "/api/index.php"
     }
   ],
+  "outputDirectory": "public",
   "env": {
     "APP_CONFIG_CACHE": "/tmp/config.php",
     "APP_EVENTS_CACHE": "/tmp/events.php",
