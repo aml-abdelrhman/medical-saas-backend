@@ -28,10 +28,23 @@ class Service extends Model
         'is_active' => 'boolean'
     ];
 
+    /**
+     * Accessor لجلب صورة الخدمة سواء كانت رابطاً سحابياً من Cloudinary أو مساراً محلياً
+     */
     protected function image(): Attribute
     {
         return Attribute::make(
-            get: fn ($value) => $value ? (str_starts_with($value, 'http') ? $value : asset('storage/' . $value)) : null,
+            get: function ($value) {
+                if (!$value) {
+                    return null;
+                }
+                if (str_starts_with($value, 'http')) {
+                    return $value;
+                }
+                // تنظيف المسار لضمان عدم تكرار كلمة storage
+                $cleanValue = str_replace(['storage/', 'storage'], '', $value);
+                return asset('storage/' . ltrim($cleanValue, '/'));
+            },
         );
     }
 
@@ -39,7 +52,6 @@ class Service extends Model
     {
         return $this->belongsTo(Clinic::class);
     }
-
 
     public function doctor()
     {

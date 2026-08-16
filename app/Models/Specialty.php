@@ -19,7 +19,6 @@ class Specialty extends Model
         'clinic_id'
     ];
 
-
     protected $casts = [
         'name' => 'array',
         'description' => 'array',
@@ -28,20 +27,35 @@ class Specialty extends Model
     protected static function booted()
     {
         static::creating(function ($specialty) {
-            $specialty->slug = Str::slug($specialty->name['ar'] ?? $specialty->name['en']);
+            $name = is_array($specialty->name) ? $specialty->name : json_decode($specialty->name, true);
+            $specialty->slug = Str::slug($name['ar'] ?? ($name['en'] ?? 'specialty'));
         });
 
         static::updating(function ($specialty) {
             if ($specialty->isDirty('name')) {
-                $specialty->slug = Str::slug($specialty->name['ar'] ?? $specialty->name['en']);
+                $name = is_array($specialty->name) ? $specialty->name : json_decode($specialty->name, true);
+                $specialty->slug = Str::slug($name['ar'] ?? ($name['en'] ?? 'specialty'));
             }
         });
     }
 
+    /**
+     * Accessor لجلب صورة التخصص سواء كانت رابطاً سحابياً من Cloudinary أو مساراً محلياً
+     */
     protected function image(): Attribute
     {
         return Attribute::make(
-            get: fn ($value) => $value ? (str_starts_with($value, 'http') ? $value : asset('storage/' . $value)) : null,
+            get: function ($value) {
+                if (!$value) {
+                    return null;
+                }
+                if (str_starts_with($value, 'http')) {
+                    return $value;
+                }
+                // تنظيف المسار لضمان عدم تكرار كلمة storage
+                $cleanValue = str_replace(['storage/', 'storage'], '', $value);
+                return asset('storage/' . ltrim($cleanValue, '/'));
+            },
         );
     }
 

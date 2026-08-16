@@ -1,5 +1,4 @@
 <?php
-
 // ------------------------------------------------------------------
 // CORS Configuration for Vercel Serverless
 // ------------------------------------------------------------------
@@ -24,10 +23,12 @@ $dirs = [
     $tmpBase . '/framework/sessions',
     $tmpBase . '/framework/views',
     $tmpBase . '/logs',
+    $tmpBase . '/bootstrap/cache',   // <-- ده الناقص
 ];
 foreach ($dirs as $dir) {
-    if (!is_dir($dir))
+    if (!is_dir($dir)) {
         mkdir($dir, 0777, true);
+    }
 }
 
 putenv('CACHE_STORE=array');
@@ -38,28 +39,21 @@ putenv('APP_DEBUG=true');
 
 try {
     require __DIR__ . '/../vendor/autoload.php';
-
     $app = require_once __DIR__ . '/../bootstrap/app.php';
+
     $app->useStoragePath($tmpBase);
+    $app->useBootstrapPath($tmpBase . '/bootstrap');   // <-- ده كمان الناقص
 
     $kernel = $app->make(Illuminate\Contracts\Http\Kernel::class);
-
-    // Fix for Vercel routing: Ensure Laravel doesn't strip /api
     $_SERVER['SCRIPT_NAME'] = '/index.php';
-
     $request = Illuminate\Http\Request::capture();
     $response = $kernel->handle($request);
-
     $response->send();
     $kernel->terminate($request, $response);
-
 } catch (\Throwable $e) {
-    // تم إضافة هيدر الـ CORS هنا عشان المتصفح يمنع ظهور Network Error الوهمية
-    // ويسمح بقراءة تفاصيل الخطأ الحقيقي وإظهارها في الـ Console مباشرة
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, Accept, Origin');
-    
     http_response_code(500);
     header('Content-Type: application/json');
     echo json_encode([

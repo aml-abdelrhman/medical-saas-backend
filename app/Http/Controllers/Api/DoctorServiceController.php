@@ -6,8 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Service;
 use App\Models\Doctor;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class DoctorServiceController extends Controller
 {
@@ -15,21 +15,14 @@ class DoctorServiceController extends Controller
     {
         $user = auth()->user();
         
-        // إذا كان الطبيب مسجل دخول، نجلب خدماته وخدمات عيادته
-        $doctor = Doctor::where('user_id', $user->id)->first();
+        $doctor = Doctor::where('user_id', $user?->id)->first();
         
         $query = Service::query();
 
         if ($doctor) {
             $query->where('doctor_id', $doctor->id);
-            // ربط بالكلينك آي دي إذا كان متوفراً في جدول الطبيب
-            if ($doctor->clinic_id) {
-                // إذا كان جدول الخدمات يحتوي على عمود clinic_id
-                // $query->orWhere('clinic_id', $doctor->clinic_id);
-            }
         }
 
-        // إمكانية الفلترة المباشرة عبر الـ Request إذا تم إرسال clinic_id
         if ($request->has('clinic_id')) {
             $query->where('clinic_id', $request->clinic_id);
         }
@@ -43,7 +36,10 @@ class DoctorServiceController extends Controller
                 'price' => $service->price,
                 'duration_minutes' => $service->duration_minutes,
                 'is_active' => $service->is_active,
-                'image_url' => $service->image ? (str_starts_with($service->image, 'http') ? $service->image : asset('storage/' . $service->image)) : null
+                // دعم روابط Cloudinary المباشرة أو الروابط القديمة
+                'image_url' => $service->image 
+                    ? (str_starts_with($service->image, 'http') ? $service->image : asset('storage/' . $service->image)) 
+                    : null
             ];
         });
         
@@ -52,20 +48,30 @@ class DoctorServiceController extends Controller
 
     public function store(Request $request)
     {
-        $data = $request->except(['image', '_method']);
         $user = auth()->user();
-        
         $doctor = Doctor::where('user_id', $user->id)->first();
+
+        // إضافة Validation لمنع أخطاء 422 المفاجئة وعرض رسائل واضحة
+        $validated = $request->validate([
+            'name'             => 'required',
+            'price'            => 'required|numeric|min:0',
+            'duration_minutes' => 'nullable|integer|min:1',
+            'is_active'        => 'nullable|boolean',
+            'image'            => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
+        ]);
+
+        $data = $validated;
         
         if ($doctor) {
             $data['doctor_id'] = $doctor->id;
-            // جلب الـ clinic_id تلقائياً من بيانات الطبيب أو المستخدم
             $data['clinic_id'] = $doctor->clinic_id ?? $user->clinic_id ?? null;
         }
 
+        // رفع الصورة إلى Cloudinary باستخدام Storage Disk الموحد
         if ($request->hasFile('image')) {
-            $path = $request->file('image')->store('services', 'public');
-            $data['image'] = $path; 
+            $path = $request->file('image')->store('services', 'cloudinary');
+            $data['image'] = Storage::disk('cloudinary')->url($path);
+            Log::info('=== SERVICE STORE: CLOUDINARY IMAGE UPLOADED ===', ['url' => $data['image']]);
         }
 
         $service = Service::create($data);
@@ -80,26 +86,28 @@ class DoctorServiceController extends Controller
     public function update(Request $request, $id)
     {
         $service = Service::where('id', $id)->firstOrFail();
-        $data = $request->except(['image', '_method']);
+        
+        $validated = $request->validate([
+            'name'             => 'sometimes|required',
+            'price'            => 'sometimes|required|numeric|min:0',
+            'duration_minutes' => 'nullable|integer|min:1',
+            'is_active'        => 'nullable|boolean',
+            'image'            => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
+        ]);
 
-        // الحفاظ على ربط الـ clinic_id إذا لم يتم إرساله أو تحديثه
+        $data = $validated;
+
         $user = auth()->user();
         $doctor = Doctor::where('user_id', $user->id)->first();
         if ($doctor && !isset($data['clinic_id'])) {
             $data['clinic_id'] = $doctor->clinic_id ?? $user->clinic_id ?? $service->clinic_id;
         }
 
+        // رفع الصورة الجديدة عبر Cloudinary باستخدام Storage Disk الموحد
         if ($request->hasFile('image')) {
-            $rawImage = $service->getAttributes()['image'] ?? $service->image;
-            if ($rawImage) {
-                $relativePath = str_replace('/storage/', '', parse_url($rawImage, PHP_URL_PATH) ?? $rawImage);
-                if (Storage::disk('public')->exists($relativePath)) {
-                    Storage::disk('public')->delete($relativePath);
-                }
-            }
-            
-            $path = $request->file('image')->store('services', 'public');
-            $data['image'] = $path;
+            $path = $request->file('image')->store('services', 'cloudinary');
+            $data['image'] = Storage::disk('cloudinary')->url($path);
+            Log::info('=== SERVICE UPDATE: CLOUDINARY IMAGE UPLOADED ===', ['url' => $data['image']]);
         }
 
         $service->update($data);
@@ -118,14 +126,7 @@ class DoctorServiceController extends Controller
 
         $service = Service::where('id', $id)->where('doctor_id', $doctor?->id)->firstOrFail();
         
-        $rawImage = $service->getAttributes()['image'] ?? $service->image;
-        if ($rawImage) {
-            $relativePath = str_replace('/storage/', '', parse_url($rawImage, PHP_URL_PATH) ?? $rawImage);
-            if (Storage::disk('public')->exists($relativePath)) {
-                Storage::disk('public')->delete($relativePath);
-            }
-        }
-        
+        // الحذف من قاعدة البيانات مباشرة (الصور على Cloudinary لا تحتاج لحذف محلي معقد)
         $service->delete();
         
         return response()->json([

@@ -26,12 +26,16 @@ class Clinic extends Model
         'subscription_ends_at' => 'datetime',
     ];
 
-    // الـ Accessor الصحيح لجلب الصور من الـ Storage مباشرة
+    /**
+     * الـ Accessor لجلب الشعار سواء كان رابطاً سحابياً من Cloudinary أو مساراً محلياً
+     */
     protected function logo(): Attribute
     {
         return Attribute::make(
             get: function ($value) {
-                if (!$value) return null;
+                if (!$value) {
+                    return null;
+                }
                 if (str_starts_with($value, 'http')) {
                     return $value;
                 }
@@ -77,20 +81,19 @@ class Clinic extends Model
         return $this->reviews()->count();
     }
 
-
     public function contactMessages()
     {
         return $this->hasMany(ClinicContactMessage::class);
     }
+
     // علاقة مالك العيادة
-public function owner()
-{
-    return $this->belongsTo(User::class, 'user_id'); 
+    public function owner()
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
 
-
-}
-public function users()
-{
-    return $this->hasMany(User::class, 'clinic_id');
-}
+    public function users()
+    {
+        return $this->hasMany(User::class, 'clinic_id');
+    }
 }

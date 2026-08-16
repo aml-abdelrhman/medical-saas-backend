@@ -4,31 +4,32 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Clinic;
-use App\Models\User; // تأكدي أيضاً من إضافة الـ User Model لو مش موجودة
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\DB; // <--- أضيفي هذا السطر هنا
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class ClinicController extends Controller
 {
-  public function store(Request $request)
+    public function store(Request $request)
     {
         try {
             $validated = $request->validate([
-                'name' => 'required|string|max:255',
-                'slug' => 'required|string|max:255|unique:clinics,slug',
+                'name'       => 'required|string|max:255',
+                'slug'       => 'required|string|max:255|unique:clinics,slug',
                 'owner_name' => 'required|string|max:255',
-                'email' => 'required|email|unique:users,email|unique:clinics,email',
-                'phone' => 'required|string|max:20',
-                'password' => 'required|string|min:6',
-                'logo' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:12288',
+                'email'      => 'required|email|unique:users,email|unique:clinics,email',
+                'phone'      => 'required|string|max:20',
+                'password'   => 'required|string|min:6',
+                'logo'       => 'nullable|image|mimes:jpeg,png,jpg,webp|max:12288',
             ]);
 
             $result = DB::transaction(function () use ($request, $validated) {
                 $plainPassword = $validated['password'];
 
-                // 1. تجهيز بيانات العيادة
                 $inputName = $validated['name'];
                 $encodedName = json_encode([
                     'ar' => $inputName,
@@ -36,86 +37,89 @@ class ClinicController extends Controller
                 ], JSON_UNESCAPED_UNICODE);
 
                 $logoPath = null;
+                // رفع شعار العيادة عبر Cloudinary باستخدام Storage Disk الموحد
                 if ($request->hasFile('logo')) {
-                    $file = $request->file('logo');
-                    $filename = time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                    $file->move(public_path('uploads/clinics-logos'), $filename);
-                    $logoPath = 'uploads/clinics-logos/' . $filename;
+                    $path = $request->file('logo')->store('clinics', 'cloudinary');
+                    $uploadedFileUrl = Storage::disk('cloudinary')->url($path);
+                    
+                    $logoPath = $uploadedFileUrl;
+                    Log::info('=== CLINIC STORE: CLOUDINARY LOGO UPLOADED ===', ['url' => $uploadedFileUrl]);
                 }
 
-                // إدخال البيانات في جدول الـ clinics مع ملء الحقول الإجبارية لتجنب خطأ الـ Database
                 $clinic = Clinic::create([
-                    'name' => $encodedName,
-                    'slug' => $validated['slug'],
-                    'owner_name' => $validated['owner_name'], // حفظ اسم المالك في الجدول لتجنب خطأ 1364
-                    'email' => $validated['email'],           // إيميل التواصل للعيادة
-                    'phone' => $validated['phone'],           // هاتف العيادة
-                    'password' => Hash::make($plainPassword), // باسورد مؤقت للعيادة إن وجد في الـ fillable
-                    'logo' => $logoPath,
-                    'status' => 'active',
+                    'name'       => $encodedName,
+                    'slug'       => $validated['slug'],
+                    'owner_name' => $validated['owner_name'],
+                    'email'      => $validated['email'],
+                    'phone'      => $validated['phone'],
+                    'password'   => Hash::make($plainPassword),
+                    'logo'       => $logoPath,
+                    'status'     => 'active',
                 ]);
 
-                // 2. إنشاء حساب المالك في جدول الـ users وربطه بالعيادة عبر clinic_id
                 $user = User::create([
-                    'name' => $validated['owner_name'],
-                    'email' => $validated['email'],
-                    'password' => Hash::make($plainPassword),
-                    'phone' => $validated['phone'],
-                    'role' => 'admin',       // مدير العيادة حسب دالة isClinicAdmin
+                    'name'      => $validated['owner_name'],
+                    'email'     => $validated['email'],
+                    'password'  => Hash::make($plainPassword),
+                    'phone'     => $validated['phone'],
+                    'role'      => 'admin',
                     'clinic_id' => $clinic->id,
                 ]);
 
-                // إنشاء Token لتسجيل الدخول فوراً
                 $token = $user->createToken('myapptoken')->plainTextToken;
 
                 return [
                     'clinic' => $clinic->load(['doctors', 'services']),
-                    'user' => $user,
-                    'token' => $token
+                    'user'   => $user,
+                    'token'  => $token
                 ];
             });
 
             return response()->json([
-                'status' => true,
+                'status'  => true,
                 'message' => 'تم تسجيل العيادة وحساب المالك بنجاح',
-                'data' => $result['clinic'],
-                'user' => $result['user'],
-                'token' => $result['token']
+                'data'    => $result['clinic'],
+                'user'    => $result['user'],
+                'token'   => $result['token']
             ], 201);
 
         } catch (ValidationException $e) {
             return response()->json([
-                'status' => false,
+                'status'  => false,
                 'message' => 'فشل التحقق من البيانات المدخلة',
-                'errors' => $e->errors()
+                'errors'  => $e->errors()
             ], 422);
         } catch (\Exception $e) {
             return response()->json([
-                'status' => false,
+                'status'  => false,
                 'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine()
+                'file'    => $e->getFile(),
+                'line'    => $e->getLine()
             ], 500);
         }
     }
     
     public function show($slug)
     {
-        $clinic = Clinic::where('slug', $slug)->with(['specialties', 'doctors', 'services', 'reviews.patient'])->first();
+        $clinic = Clinic::where('slug', $slug)
+            ->with(['specialties', 'doctors', 'services', 'reviews.patient'])
+            ->first();
 
         if (!$clinic) {
             return response()->json([
-                'status' => false,
+                'status'  => false,
                 'message' => 'العيادة غير موجودة'
             ], 404);
         }
 
-        $clinic->average_rating = $clinic->average_rating;
-        $clinic->reviews_count = $clinic->reviews_count;
+        $clinicData = $clinic->toArray();
+        $clinicData['name'] = is_string($clinic->name) ? (json_decode($clinic->name, true) ?? $clinic->name) : $clinic->name;
+        $clinicData['average_rating'] = $clinic->average_rating;
+        $clinicData['reviews_count'] = $clinic->reviews_count;
 
         return response()->json([
             'status' => true,
-            'data' => $clinic
+            'data'   => $clinicData
         ], 200);
     }
 
@@ -125,16 +129,24 @@ class ClinicController extends Controller
 
         if (!$clinic) {
             return response()->json([
-                'status' => false,
+                'status'  => false,
                 'message' => 'العيادة غير موجودة'
             ], 404);
         }
 
-        $doctors = $clinic->doctors()->with('specialty')->get();
+        $doctors = $clinic->doctors()->with('specialty')->get()->map(function ($doctor) {
+            $doctorArray = $doctor->toArray();
+            $doctorArray['name'] = is_string($doctor->name) ? (json_decode($doctor->name, true) ?? $doctor->name) : $doctor->name;
+            if (isset($doctorArray['specialty']) && is_array($doctorArray['specialty'])) {
+                $specName = $doctor->specialty->name ?? null;
+                $doctorArray['specialty']['name'] = is_string($specName) ? (json_decode($specName, true) ?? $specName) : $specName;
+            }
+            return $doctorArray;
+        });
 
         return response()->json([
             'status' => true,
-            'data' => $doctors
+            'data'   => $doctors
         ], 200);
     }
 
@@ -144,16 +156,24 @@ class ClinicController extends Controller
 
         if (!$clinic) {
             return response()->json([
-                'status' => false,
+                'status'  => false,
                 'message' => 'العيادة غير موجودة'
             ], 404);
         }
 
-        $specialties = $clinic->specialties;
+        $specialties = $clinic->specialties->map(function ($specialty) {
+            return [
+                'id'          => $specialty->id,
+                'clinic_id'   => $specialty->clinic_id,
+                'name'        => is_string($specialty->name) ? (json_decode($specialty->name, true) ?? $specialty->name) : $specialty->name,
+                'description' => is_string($specialty->description) ? (json_decode($specialty->description, true) ?? $specialty->description) : $specialty->description,
+                'slug'        => $specialty->slug
+            ];
+        });
 
         return response()->json([
             'status' => true,
-            'data' => $specialties
+            'data'   => $specialties
         ], 200);
     }
 
@@ -163,16 +183,20 @@ class ClinicController extends Controller
 
         if (!$clinic) {
             return response()->json([
-                'status' => false,
+                'status'  => false,
                 'message' => 'العيادة غير موجودة'
             ], 404);
         }
 
-        $services = $clinic->services()->where('is_active', true)->get();
+        $services = $clinic->services()->where('is_active', true)->get()->map(function ($service) {
+            $serviceArray = $service->toArray();
+            $serviceArray['name'] = is_string($service->name) ? (json_decode($service->name, true) ?? $service->name) : $service->name;
+            return $serviceArray;
+        });
 
         return response()->json([
             'status' => true,
-            'data' => $services
+            'data'   => $services
         ], 200);
     }
 
@@ -182,16 +206,16 @@ class ClinicController extends Controller
             $plans = \App\Models\Plan::all();
 
             return response()->json([
-                'status' => true,
+                'status'  => true,
                 'message' => 'تم جلب الباقات بنجاح',
-                'data' => $plans
+                'data'    => $plans
             ], 200);
 
         } catch (\Exception $e) {
             return response()->json([
-                'status' => false,
+                'status'  => false,
                 'message' => 'حدث خطأ في الخادم',
-                'error' => $e->getMessage()
+                'error'   => $e->getMessage()
             ], 500);
         }
     }

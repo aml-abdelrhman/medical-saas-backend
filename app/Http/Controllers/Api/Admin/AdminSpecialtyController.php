@@ -13,7 +13,6 @@ class AdminSpecialtyController extends Controller
     // عرض جميع التخصصات الخاصة بعيادة الأدمن الحالي
     public function index(Request $request)
     {
-        // استخراج الـ clinic_id من المستخدم الحالي أو الـ Request
         $user = $request->user();
         $clinicId = $user->clinic_id ?? $user->clinic?->id;
 
@@ -22,25 +21,29 @@ class AdminSpecialtyController extends Controller
             $query->where('clinic_id', $clinicId);
         }
 
-        return response()->json(['success' => true, 'data' => $query->get()]);
+        $specialties = $query->get()->map(function ($specialty) {
+            return $this->formatSpecialty($specialty);
+        });
+
+        return response()->json(['success' => true, 'data' => $specialties]);
     }
 
     // عرض تخصص واحد بالـ id
     public function show($id)
     {
         $specialty = Specialty::findOrFail($id);
-        return response()->json(['success' => true, 'data' => $specialty]);
+        return response()->json(['success' => true, 'data' => $this->formatSpecialty($specialty)]);
     }
 
     // إضافة تخصص جديد مرتبط بالـ clinic_id
     public function store(Request $request)
     {
-        $request->validate([
-            'name' => 'required',
+        $validated = $request->validate([
+            'name'        => 'required',
             'description' => 'required',
-            'slug' => 'required|unique:specialties,slug',
-            'clinic_id' => 'required|exists:clinics,id',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048'
+            'slug'        => 'required|unique:specialties,slug',
+            'clinic_id'   => 'required|exists:clinics,id',
+            'image'       => 'nullable|image|mimes:jpeg,png,jpg,webp,gif|max:2048'
         ]);
 
         $specialty = new Specialty();
@@ -49,21 +52,21 @@ class AdminSpecialtyController extends Controller
         $specialty->slug = $request->input('slug');
         $specialty->clinic_id = $request->input('clinic_id');
 
-        // تخزين الصورة محلياً وإرجاع الرابط كاملاً
+        // رفع الصورة إلى Cloudinary باستخدام Storage Disk
         if ($request->hasFile('image')) {
-            $path = $request->file('image')->store('specialties', 'public');
-            // توليد الرابط الكامل مباشرة لتفادي أي مشاكل عرض
-            $fullUrl = asset('storage/' . $path);
-            $specialty->image = $path; // أو حفظ المسار النسبي أو $fullUrl حسب رغبتك في الداتابيز
+            $path = $request->file('image')->store('specialties', 'cloudinary');
+            $uploadedFileUrl = Storage::disk('cloudinary')->url($path);
             
-            Log::info('=== ADMIN SPECIALTY STORE: LOCAL IMAGE ===', ['path' => $path, 'url' => $fullUrl]);
+            $specialty->image = $uploadedFileUrl; 
+            Log::info('=== ADMIN SPECIALTY STORE: CLOUDINARY IMAGE ===', ['url' => $uploadedFileUrl]);
         }
 
         $specialty->save();
 
         return response()->json([
+            'success' => true,
             'message' => 'تمت إضافة التخصص بنجاح', 
-            'data' => $specialty
+            'data'    => $this->formatSpecialty($specialty)
         ], 201);
     }
 
@@ -73,15 +76,15 @@ class AdminSpecialtyController extends Controller
         $specialty = Specialty::findOrFail($id);
 
         $request->validate([
-            'name' => 'sometimes',
+            'name'        => 'sometimes',
             'description' => 'sometimes',
-            'slug' => 'sometimes|unique:specialties,slug,' . $id,
-            'clinic_id' => 'sometimes|exists:clinics,id',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048'
+            'slug'        => 'sometimes|unique:specialties,slug,' . $id,
+            'clinic_id'   => 'sometimes|exists:clinics,id',
+            'image'       => 'nullable|image|mimes:jpeg,png,jpg,webp,gif|max:2048'
         ]);
 
         Log::info('=== ADMIN SPECIALTY UPDATE: HAS FILE? ===', [
-            'hasFile' => $request->hasFile('image'),
+            'hasFile'  => $request->hasFile('image'),
             'all_keys' => array_keys($request->all()),
         ]);
 
@@ -90,24 +93,21 @@ class AdminSpecialtyController extends Controller
         if ($request->has('slug')) $specialty->slug = $request->input('slug');
         if ($request->has('clinic_id')) $specialty->clinic_id = $request->input('clinic_id');
 
-        // تحديث الصورة محلياً
+        // رفع الصورة الجديدة عبر Cloudinary باستخدام Storage Disk
         if ($request->hasFile('image')) {
-            // حذف الصورة القديمة إذا أردتِ تنظيف السيرفر
-            if ($specialty->image && Storage::disk('public')->exists($specialty->image)) {
-                Storage::disk('public')->delete($specialty->image);
-            }
-
-            $path = $request->file('image')->store('specialties', 'public');
-            $specialty->image = $path;
+            $path = $request->file('image')->store('specialties', 'cloudinary');
+            $uploadedFileUrl = Storage::disk('cloudinary')->url($path);
             
-            Log::info('=== ADMIN SPECIALTY UPDATE: NEW LOCAL IMAGE ===', ['path' => $path]);
+            $specialty->image = $uploadedFileUrl;
+            Log::info('=== ADMIN SPECIALTY UPDATE: NEW CLOUDINARY IMAGE ===', ['url' => $uploadedFileUrl]);
         }
 
         $specialty->save();
 
         return response()->json([
+            'success' => true,
             'message' => 'تم تحديث التخصص بنجاح', 
-            'data' => $specialty
+            'data'    => $this->formatSpecialty($specialty)
         ]);
     }
 
@@ -117,19 +117,29 @@ class AdminSpecialtyController extends Controller
         $specialty = Specialty::findOrFail($id);
 
         if ($specialty->doctors()->count() > 0 && !$request->has('force')) {
-            return response()->json(['message' => 'هذا التخصص مرتبط بأطباء!'], 409);
+            return response()->json(['success' => false, 'message' => 'هذا التخصص مرتبط بأطباء!'], 409);
         }
 
         if ($request->has('force')) {
             $specialty->doctors()->delete();
         }
 
-        // حذف الصورة المرتبطة من التخزين المحلي
-        if ($specialty->image && Storage::disk('public')->exists($specialty->image)) {
-            Storage::disk('public')->delete($specialty->image);
-        }
-
+        // الصور على Cloudinary لا تتطلب حذفاً محلياً معقداً
         $specialty->delete();
-        return response()->json(['message' => 'تم الحذف بنجاح']);
+        
+        return response()->json(['success' => true, 'message' => 'تم الحذف بنجاح']);
+    }
+
+    // دالة مساعدة لتنسيق البيانات وإرجاعها بشكل نظيف
+    private function formatSpecialty($specialty)
+    {
+        return [
+            'id'          => $specialty->id,
+            'clinic_id'   => $specialty->clinic_id,
+            'name'        => is_string($specialty->name) ? (json_decode($specialty->name, true) ?? $specialty->name) : $specialty->name,
+            'description' => is_string($specialty->description) ? (json_decode($specialty->description, true) ?? $specialty->description) : $specialty->description,
+            'slug'        => $specialty->slug,
+            'image'       => $specialty->image,
+        ];
     }
 }

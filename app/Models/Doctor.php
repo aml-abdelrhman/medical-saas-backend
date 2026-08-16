@@ -16,7 +16,7 @@ class Doctor extends Model
         'user_id', 
         'specialty_id', 
         'name', 
-        'slug', // 👈 أضف هذا السطر هنا لحل المشكلة
+        'slug', 
         'bio', 
         'years_experience', 
         'rating', 
@@ -32,12 +32,22 @@ class Doctor extends Model
     ];
 
     /**
-     * Accessor لجعل رابط الصورة يأتي كاملاً وجاهزاً للاستخدام مباشرة
+     * الـ Accessor لجلب صورة الطبيب سواء كانت رابطاً سحابياً من Cloudinary أو مساراً محلياً
      */
     protected function image(): Attribute
     {
         return Attribute::make(
-            get: fn ($value) => $value ? asset('storage/' . $value) : null
+            get: function ($value) {
+                if (!$value) {
+                    return null;
+                }
+                if (str_starts_with($value, 'http')) {
+                    return $value;
+                }
+                // تنظيف المسار لضمان عدم تكرار كلمة storage
+                $cleanValue = str_replace(['storage/', 'storage'], '', $value);
+                return asset('storage/' . ltrim($cleanValue, '/'));
+            },
         );
     }
     
@@ -51,15 +61,18 @@ class Doctor extends Model
         return $this->belongsTo(User::class, 'user_id'); 
     }
 
-    public function specialty() {
+    public function specialty() 
+    {
         return $this->belongsTo(Specialty::class);
     }
 
-    public function services() {
+    public function services() 
+    {
         return $this->hasMany(Service::class);
     }
      
-    public function availabilities() {
+    public function availabilities() 
+    {
         return $this->hasMany(DoctorAvailability::class);
     }
 

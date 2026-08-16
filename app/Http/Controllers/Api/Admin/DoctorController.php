@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB; 
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -18,10 +19,15 @@ class DoctorController extends Controller
      */
     public function index(Request $request)
     {
+        $user = $request->user();
+        $clinicId = $request->input('clinic_id') ?? ($user?->clinic_id ?? $user?->clinic?->id);
+
         $query = Doctor::with(['specialty', 'user']);
 
-        if ($request->filled('clinic_id') && optional($request->user())->role === 'super_admin') {
-            $query->where('doctors.clinic_id', $request->input('clinic_id'));
+        if ($clinicId && optional($user)->role === 'super_admin') {
+            $query->where('doctors.clinic_id', $clinicId);
+        } elseif ($clinicId) {
+            $query->where('doctors.clinic_id', $clinicId);
         }
 
         if ($request->filled('specialty_id')) {
@@ -29,25 +35,14 @@ class DoctorController extends Controller
         }
 
         $doctors = $query->get()->map(function ($doctor) {
-            return [
-                'id'               => $doctor->id,
-                'user_id'          => $doctor->user_id,
-                'name'             => $doctor->name,
-                'bio'              => $doctor->bio,
-                'image'            => $doctor->image,
-                'specialty_id'     => $doctor->specialty_id,
-                'specialty'        => $doctor->specialty,
-                'years_experience' => $doctor->years_experience,
-                'price_from'       => $doctor->price_from,
-                'rating'           => $doctor->rating,
-            ];
+            return $this->formatDoctor($doctor, true);
         });
 
-        return response()->json(['status' => true, 'data' => $doctors]);
+        return response()->json(['success' => true, 'data' => $doctors]);
     }
 
     /**
-     * إضافة طبيب جديد (من لوحة تحكم الأدمن للعيادة) وينشئ له حساب في جدول المستخدمين
+     * إضافة طبيب جديد (من لوحة تحكم الأدمن للعيادة) وينشئ له حساب في جدول المستخدمين ورفع الصورة عبر Cloudinary
      */
     public function store(Request $request)
     {
@@ -57,21 +52,27 @@ class DoctorController extends Controller
             'email'            => 'required|email|unique:users,email',
             'password'         => 'required|string|min:6',
             'specialty_id'     => 'required|exists:specialties,id',
+            'clinic_id'        => 'nullable|exists:clinics,id',
             'bio'              => 'nullable|string',
             'years_experience' => 'nullable|integer|min:0',
             'price_from'       => 'required|numeric|min:0',
-            'languages'        => 'nullable|string',
+            'languages'        => 'nullable',
             'rating'           => 'nullable|numeric|min:0|max:5',
             'image'            => 'nullable|image|max:5120',
         ]);
 
-        $clinicId = $request->input('clinic_id') ?? optional($request->user())->clinic_id;
+        $user = $request->user();
+        $clinicId = $validated['clinic_id'] ?? ($user?->clinic_id ?? $user?->clinic?->id);
+
+        if (!$clinicId) {
+            return response()->json(['success' => false, 'message' => 'رقم العيادة غير متوفر'], 422);
+        }
 
         DB::beginTransaction();
 
         try {
             // 1. إنشاء الحساب في جدول users أولاً
-            $user = User::create([
+            $newUser = User::create([
                 'name'      => $validated['name_en'],
                 'email'     => $validated['email'],
                 'password'  => Hash::make($validated['password']),
@@ -79,26 +80,32 @@ class DoctorController extends Controller
                 'clinic_id' => $clinicId,
             ]);
 
-            // 2. إنشاء السجل في جدول doctors وربطه بـ user_id
+            // 2. إنشاء السجل في جدول doctors وربطه بـ user_id و clinic_id
             $doctorData = [
-                'user_id'          => $user->id,
+                'user_id'          => $newUser->id,
+                'clinic_id'        => $clinicId,
                 'slug'             => Str::slug($validated['name_en']) . '-' . uniqid(),
                 'name'             => json_encode([
                     'ar' => $validated['name_ar'],
                     'en' => $validated['name_en'],
-                ]),
+                ], JSON_UNESCAPED_UNICODE),
                 'specialty_id'     => $validated['specialty_id'],
                 'bio'              => $request->filled('bio') ? $request->input('bio') : null,
                 'years_experience' => $validated['years_experience'] ?? 0,
                 'price_from'       => $validated['price_from'],
-                'languages'        => $request->filled('languages')
-                    ? json_decode($request->input('languages'), true)
-                    : [],
+                'languages'        => $request->filled('languages') 
+                                    ? (is_string($request->input('languages')) ? json_decode($request->input('languages'), true) : $request->input('languages')) 
+                                    : [],
                 'rating'           => $validated['rating'] ?? 5,
             ];
 
+            // رفع الصورة مباشرة إلى Cloudinary باستخدام Storage Disk
             if ($request->hasFile('image')) {
-                $doctorData['image'] = $request->file('image')->store('doctors', 'public');
+                $path = $request->file('image')->store('doctors', 'cloudinary');
+                $uploadedFileUrl = Storage::disk('cloudinary')->url($path);
+                
+                $doctorData['image'] = $uploadedFileUrl;
+                Log::info('=== ADMIN DOCTOR STORE: CLOUDINARY IMAGE UPLOADED ===', ['url' => $uploadedFileUrl]);
             }
 
             $doctor = Doctor::create($doctorData);
@@ -106,14 +113,15 @@ class DoctorController extends Controller
             DB::commit();
 
             return response()->json([
-                'status'  => true,
-                'message' => 'Doctor created successfully',
+                'success' => true,
+                'message' => 'تم إنشاء الطبيب بنجاح',
                 'data'    => $this->formatDoctor($doctor->load('user', 'specialty'), true),
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['error' => $e->getMessage()], 500);
+            Log::error('Doctor Store Error: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => 'خطأ أثناء إنشاء الطبيب', 'error' => $e->getMessage()], 500);
         }
     }
 
@@ -123,12 +131,12 @@ class DoctorController extends Controller
     public function update(Request $request, $id)
     {
         $doctor = Doctor::with('user')->findOrFail($id);
-        $user   = auth()->user();
+        $user   = $request->user();
 
-        if ($user->role === 'doctor' && $doctor->user_id !== $user->id) {
+        if (optional($user)->role === 'doctor' && $doctor->user_id !== $user->id) {
             return response()->json([
-                'status'  => false,
-                'message' => 'Unauthorized - this is not your profile',
+                'success' => false,
+                'message' => 'غير مصرح لك بتعديل هذا الملف الشخصي',
             ], 403);
         }
 
@@ -136,6 +144,7 @@ class DoctorController extends Controller
             'name_ar'          => 'sometimes|string|max:255',
             'name_en'          => 'sometimes|string|max:255',
             'specialty_id'     => 'sometimes|exists:specialties,id',
+            'clinic_id'        => 'sometimes|exists:clinics,id',
             'bio'              => 'nullable',
             'years_experience' => 'nullable|integer|min:0',
             'price_from'       => 'sometimes|numeric|min:0',
@@ -153,13 +162,13 @@ class DoctorController extends Controller
 
             if (isset($validated['name_ar']) || isset($validated['name_en'])) {
                 $currentName = is_array($doctor->name) ? $doctor->name : (json_decode($doctor->name, true) ?? []);
-                $newNameAr = $validated['name_ar'] ?? $currentName['ar'] ?? '';
-                $newNameEn = $validated['name_en'] ?? $currentName['en'] ?? '';
+                $newNameAr = $validated['name_ar'] ?? ($currentName['ar'] ?? '');
+                $newNameEn = $validated['name_en'] ?? ($currentName['en'] ?? '');
 
-                $doctorData['name'] = [
+                $doctorData['name'] = json_encode([
                     'ar' => $newNameAr,
                     'en' => $newNameEn,
-                ];
+                ], JSON_UNESCAPED_UNICODE);
 
                 if (isset($validated['name_en'])) {
                     $doctorData['slug'] = Str::slug($newNameEn) . '-' . $doctor->id;
@@ -170,7 +179,7 @@ class DoctorController extends Controller
                 $doctorData['bio'] = $request->input('bio');
             }
 
-            foreach (['specialty_id', 'years_experience', 'price_from', 'rating'] as $field) {
+            foreach (['specialty_id', 'clinic_id', 'years_experience', 'price_from', 'rating'] as $field) {
                 if (isset($validated[$field])) {
                     $doctorData[$field] = $validated[$field];
                 }
@@ -182,11 +191,13 @@ class DoctorController extends Controller
                     : $request->input('languages');
             }
 
+            // رفع الصورة الجديدة عبر Cloudinary باستخدام Storage Disk
             if ($request->hasFile('image')) {
-                if ($doctor->getRawOriginal('image')) {
-                    Storage::disk('public')->delete($doctor->getRawOriginal('image'));
-                }
-                $doctorData['image'] = $request->file('image')->store('doctors', 'public');
+                $path = $request->file('image')->store('doctors', 'cloudinary');
+                $uploadedFileUrl = Storage::disk('cloudinary')->url($path);
+                
+                $doctorData['image'] = $uploadedFileUrl;
+                Log::info('=== ADMIN DOCTOR UPDATE: NEW CLOUDINARY IMAGE ===', ['url' => $uploadedFileUrl]);
             }
 
             if (!empty($doctorData)) {
@@ -207,14 +218,15 @@ class DoctorController extends Controller
             DB::commit();
 
             return response()->json([
-                'status'  => true,
-                'message' => 'Doctor updated successfully',
+                'success' => true,
+                'message' => 'تم تحديث بيانات الطبيب بنجاح',
                 'data'    => $this->formatDoctor($doctor->fresh()->load('user', 'specialty'), true),
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['error' => $e->getMessage()], 500);
+            Log::error('Doctor Update Error: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => 'خطأ أثناء التحديث', 'error' => $e->getMessage()], 500);
         }
     }
 
@@ -229,10 +241,7 @@ class DoctorController extends Controller
             $doctor = Doctor::findOrFail($id);
             $userId = $doctor->user_id;
 
-            if ($doctor->getRawOriginal('image')) {
-                Storage::disk('public')->delete($doctor->getRawOriginal('image'));
-            }
-
+            // الصور على Cloudinary لا تحتاج إلى حذف محلي
             $doctor->delete();
 
             if ($userId) {
@@ -242,33 +251,37 @@ class DoctorController extends Controller
             DB::commit();
 
             return response()->json([
-                'status'  => true,
-                'message' => 'Doctor deleted successfully',
+                'success' => true,
+                'message' => 'تم حذف الطبيب وحسابه بنجاح',
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['error' => $e->getMessage()], 500);
+            Log::error('Doctor Delete Error: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => 'خطأ أثناء الحذف', 'error' => $e->getMessage()], 500);
         }
     }
 
     private function formatDoctor($doctor, $full = false)
     {
+        $decodedName = is_string($doctor->name) ? (json_decode($doctor->name, true) ?? $doctor->name) : $doctor->name;
+
         $data = [
             'id'               => $doctor->id,
             'user_id'          => $doctor->user_id,
-            'name'             => $doctor->name,
-            'image'            => $doctor->image,
+            'clinic_id'        => $doctor->clinic_id ?? null,
+            'name'             => $decodedName,
+            'image'            => $doctor->image, // رابط Cloudinary المباشر
             'specialty_id'     => $doctor->specialty_id,
             'specialty'        => $doctor->specialty,
             'user'             => $doctor->user,
-            'years_experience' => $doctor->years_experience,
-            'price_from'       => $doctor->price_from,
-            'rating'           => $doctor->rating,
+            'years_experience' => (int) $doctor->years_experience,
+            'price_from'       => (float) $doctor->price_from,
+            'rating'           => (float) $doctor->rating,
         ];
 
         if ($full) {
             $data['bio']            = $doctor->bio;
-            $data['languages']      = $doctor->languages;
+            $data['languages']      = is_string($doctor->languages) ? json_decode($doctor->languages, true) : $doctor->languages;
             $data['services']       = $doctor->services ?? [];
             $data['availabilities'] = $doctor->availabilities ?? [];
         }
