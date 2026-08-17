@@ -26,54 +26,47 @@ class ClinicController extends Controller
                 'password'   => 'required|string|min:6',
                 'logo'       => 'nullable|image|mimes:jpeg,png,jpg,webp|max:12288',
             ]);
+$result = DB::transaction(function () use ($request, $validated) {
+    $plainPassword = $validated['password'];
 
-            $result = DB::transaction(function () use ($request, $validated) {
-                $plainPassword = $validated['password'];
+    $logoPath = null;
+    // رفع شعار العيادة عبر Cloudinary باستخدام Storage Disk الموحد
+    if ($request->hasFile('logo')) {
+        $path = $request->file('logo')->store('clinics', 'cloudinary');
+        $uploadedFileUrl = Storage::disk('cloudinary')->url($path);
+        
+        $logoPath = $uploadedFileUrl;
+        Log::info('=== CLINIC STORE: CLOUDINARY LOGO UPLOADED ===', ['url' => $uploadedFileUrl]);
+    }
 
-                $inputName = $validated['name'];
-                $encodedName = json_encode([
-                    'ar' => $inputName,
-                    'en' => $inputName
-                ], JSON_UNESCAPED_UNICODE);
+    $clinic = Clinic::create([
+        'name'       => $validated['name'],   // ← string عادي زي ما هو، من غير json_encode
+        'slug'       => $validated['slug'],
+        'owner_name' => $validated['owner_name'],
+        'email'      => $validated['email'],
+        'phone'      => $validated['phone'],
+        'password'   => Hash::make($plainPassword),
+        'logo'       => $logoPath,
+        'status'     => 'active',
+    ]);
 
-                $logoPath = null;
-                // رفع شعار العيادة عبر Cloudinary باستخدام Storage Disk الموحد
-                if ($request->hasFile('logo')) {
-                    $path = $request->file('logo')->store('clinics', 'cloudinary');
-                    $uploadedFileUrl = Storage::disk('cloudinary')->url($path);
-                    
-                    $logoPath = $uploadedFileUrl;
-                    Log::info('=== CLINIC STORE: CLOUDINARY LOGO UPLOADED ===', ['url' => $uploadedFileUrl]);
-                }
+    $user = User::create([
+        'name'      => $validated['owner_name'],
+        'email'     => $validated['email'],
+        'password'  => Hash::make($plainPassword),
+        'phone'     => $validated['phone'],
+        'role'      => 'admin',
+        'clinic_id' => $clinic->id,
+    ]);
 
-                $clinic = Clinic::create([
-                    'name'       => $encodedName,
-                    'slug'       => $validated['slug'],
-                    'owner_name' => $validated['owner_name'],
-                    'email'      => $validated['email'],
-                    'phone'      => $validated['phone'],
-                    'password'   => Hash::make($plainPassword),
-                    'logo'       => $logoPath,
-                    'status'     => 'active',
-                ]);
+    $token = $user->createToken('myapptoken')->plainTextToken;
 
-                $user = User::create([
-                    'name'      => $validated['owner_name'],
-                    'email'     => $validated['email'],
-                    'password'  => Hash::make($plainPassword),
-                    'phone'     => $validated['phone'],
-                    'role'      => 'admin',
-                    'clinic_id' => $clinic->id,
-                ]);
-
-                $token = $user->createToken('myapptoken')->plainTextToken;
-
-                return [
-                    'clinic' => $clinic->load(['doctors', 'services']),
-                    'user'   => $user,
-                    'token'  => $token
-                ];
-            });
+    return [
+        'clinic' => $clinic->load(['doctors', 'services']),
+        'user'   => $user,
+        'token'  => $token
+    ];
+});
 
             return response()->json([
                 'status'  => true,
