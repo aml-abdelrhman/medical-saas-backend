@@ -40,8 +40,8 @@ class ClinicSubscriptionController extends Controller
             'status' => 'active', 
         ]);
 
-        // جلب الرابط الأساسي للفرونت إند من ملف الـ .env مباشرة مع وضع قيمة افتراضية للتطوير المحلي
-        $frontendUrl = env('APP_FRONTEND_URL', 'http://localhost:5173');
+        // جلب رابط الفرونت إند من ملف الـ .env مع وضع رابط Vercel الخاص بكِ كقيمة افتراضية آمنة
+        $frontendUrl = env('APP_FRONTEND_URL', 'https://medical-saas-frontend-5yoa.vercel.app');
         $paymentUrl = rtrim($frontendUrl, '/') . '/mock-checkout?subscription_id=' . $subscription->id;
 
         return response()->json([
