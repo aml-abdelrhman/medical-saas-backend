@@ -11,14 +11,19 @@ use Illuminate\Support\Facades\Storage;
 class AdminSpecialtyController extends Controller
 {
     // عرض جميع التخصصات الخاصة بعيادة الأدمن الحالي
-    public function index(Request $request)
+  public function index(Request $request)
     {
         $user = $request->user();
         $clinicId = $user->clinic_id ?? $user->clinic?->id;
 
         $query = Specialty::query();
+        
+        // تعديل الشرط لجلب التخصصات العامة أو الخاصة بالعيادة الحالية
         if ($clinicId) {
-            $query->where('clinic_id', $clinicId);
+            $query->where(function ($q) use ($clinicId) {
+                $q->where('clinic_id', $clinicId)
+                  ->orWhereNull('clinic_id');
+            });
         }
 
         $specialties = $query->get()->map(function ($specialty) {
